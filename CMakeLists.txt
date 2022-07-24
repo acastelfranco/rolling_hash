@@ -3,12 +3,19 @@ cmake_minimum_required(VERSION 3.10)
 # set the project name
 project(rollinghash)
 
-add_compile_options(-g0 -O3 -Wno-terminate)
+add_compile_options(-g3 -O0 -Wno-terminate)
 
 # add the executable
 add_executable(rollinghash main.cpp)
 
 target_link_libraries(rollinghash PRIVATE z)
+
+add_custom_command(
+    TARGET rollinghash
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+    ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope.txt
+)
 
 option (BUILD_DOC "Build documentation" ON)
 
