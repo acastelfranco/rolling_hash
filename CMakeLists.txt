@@ -17,6 +17,13 @@ add_custom_command(
     ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope.txt
 )
 
+add_custom_command(
+    TARGET rollinghash
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+    ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope_modified.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope_modified.txt
+)
+
 option (BUILD_DOC "Build documentation" ON)
 
 find_package (Doxygen)

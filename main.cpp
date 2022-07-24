@@ -208,11 +208,34 @@ public:
 	 */
 	void print()
 	{
+		uint32_t i = 0;
 		for (Signature entry : m_signatures)
 		{
-			printf("hash: %lu\n", entry.hash);
-			printf("size: %lu\n", entry.size);
+			printf("chunk %u hash: %lu\n", i, entry.hash);
+			printf("chunk %u size: %lu\n", i++, entry.size);
 		}
+	}
+
+	/**
+	 * @brief clear signatures vector
+	 * 
+	 */
+	void clear() {
+		m_signatures.clear();
+	}
+
+	/**
+	 * @brief overloading of the subscript operators
+	 * 
+	 * @param pos 
+	 * @return Signature& 
+	 */
+	Signature &operator[]( size_t pos ) {
+		return m_signatures[pos];
+	}
+
+	Signature const &operator[]( size_t pos ) const {
+		return m_signatures[pos];
 	}
 
 private:
@@ -368,23 +391,30 @@ static constexpr uint32_t CHUNKSIZ = 0xFFFF;
 
 int main(int argc, const char **argv)
 {
-	FileHandle fileHandle = FileService::load("starwars_a_new_hope.txt");
-	std::unique_ptr<std::vector<Signature>> signatures = HashService::getSignatures(fileHandle.data.get(), fileHandle.size, CHUNKSIZ);
+	FileHandle fileHandle1 = FileService::load("starwars_a_new_hope.txt");
+	FileHandle fileHandle2 = FileService::load("starwars_a_new_hope_modified.txt");
+	std::unique_ptr<std::vector<Signature>> signatures1 = HashService::getSignatures(fileHandle1.data.get(), fileHandle1.size, CHUNKSIZ);
+	std::unique_ptr<std::vector<Signature>> signatures2 = HashService::getSignatures(fileHandle2.data.get(), fileHandle2.size, CHUNKSIZ);
 
-	SignatureService sio(signatures);
+	SignatureService sig1(signatures1);
+	SignatureService sig2(signatures2);
 
-	sio.print();
+	sig1.print();
+	sig2.print();
 
-	sio.save("nino.bin");
-	sio.load("nino.bin");
+	sig1.save("starwars_a_new_hope.sig.bin");
+	sig2.save("starwars_a_new_hope_modified.sig.bin");
 
-	sio.print();
+#if 0
+	sig1.load("starwars_a_new_hope.sig.bin");
+	sig2.load("starwars_a_new_hope_modified.sig.bin");
 
-	uint32_t hash = HashService::hash(fileHandle.data.get(), CHUNKSIZ);
-	uint32_t hashNext = HashService::hash(fileHandle.data.get() + 1, CHUNKSIZ);
-	uint32_t hashRoll = HashService::rolling_hash(fileHandle.data.get(), CHUNKSIZ, hash);
+	uint32_t hash = HashService::hash(fileHandle1.data.get(), CHUNKSIZ);
+	uint32_t hashNext = HashService::hash(fileHandle1.data.get() + 1, CHUNKSIZ);
+	uint32_t hashRoll = HashService::rolling_hash(fileHandle1.data.get(), CHUNKSIZ, hash);
 
 	printf("hash: %u\n", hash);
 	printf("hashNext: %u\n", hashNext);
 	printf("hashRoll: %u\n", hashRoll);
+#endif
 }
