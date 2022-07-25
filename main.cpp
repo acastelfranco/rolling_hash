@@ -11,6 +11,7 @@
 #include <memory>
 #include <endian.h>
 #include <zlib.h>
+#include <algorithm>
 
 class CompressionService
 {
@@ -71,44 +72,63 @@ public:
 class SignatureException : public std::runtime_error
 {
 public:
-	SignatureException(std::string const &msg) : std::runtime_error(msg) {}
+	SignatureException(const std::string &msg) : std::runtime_error(msg) {}
 	virtual ~SignatureException() {}
 };
 
 class MalformedFileException : public std::runtime_error
 {
 public:
-	MalformedFileException(std::string const &msg) : std::runtime_error(msg) {}
+	MalformedFileException(const std::string &msg) : std::runtime_error(msg) {}
 	virtual ~MalformedFileException() {}
 };
 
 struct Signature
 {
-	uint64_t hash;
-	uint64_t size;
+	uint32_t id;
+	uint32_t hash;
+	uint32_t size;
 };
 
 struct SignatureFileHeader
 {
-	uint64_t magic;
-	uint64_t chunks;
+	uint32_t magic;
+	uint32_t chunks;
+};
+
+class OrderSignatureByHash
+{
+public:
+    inline bool operator() (const Signature& sig1, const Signature& sig2)
+    {
+        return (sig1.hash < sig2.hash);
+    }
+};
+
+class OrderSignatureById
+{
+public:
+    inline bool operator() (const Signature& sig1, const Signature& sig2)
+    {
+        return (sig1.id < sig2.id);
+    }
 };
 
 /**
  * @brief this class save generated signature for a file
  *
  */
-class SignatureService
+class SignatureFile
 {
 public:
-	SignatureService() {}
+	SignatureFile() {}
 
-	SignatureService(const std::unique_ptr<std::vector<Signature>> &in)
+	SignatureFile(const std::vector<Signature> &in)
 	{
-		m_signatures = *in.get();
+		m_signatures = in;
 	}
 
-	virtual ~SignatureService() {}
+	virtual ~SignatureFile() {}
 
 	void append(const Signature &entry)
 	{
@@ -120,7 +140,7 @@ public:
 	 *
 	 * @param filename file name
 	 */
-	void load(std::string filename) throw()
+	void load(const std::string &filename) throw()
 	{
 		SignatureFileHeader header = {0};
 
@@ -129,8 +149,8 @@ public:
 		ifs.seekg(std::ifstream::beg);
 		ifs.read(reinterpret_cast<char *>(&header), sizeof(SignatureFileHeader));
 
-		header.magic = be64toh(header.magic);
-		header.chunks = be64toh(header.chunks);
+		header.magic = be32toh(header.magic);
+		header.chunks = be32toh(header.chunks);
 
 		if (header.magic != MAGIC)
 			throw SignatureException("invalid magic");
@@ -145,23 +165,26 @@ public:
 
 		ifs.read(reinterpret_cast<char *>(in.get()), compressedBlobSize);
 
-		uint64_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), len);
+		uint32_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), len);
 
-		uint64_t *outPtr = reinterpret_cast<uint64_t *>(out.get());
+		uint32_t *outPtr = reinterpret_cast<uint32_t *>(out.get());
 
 		m_signatures.clear();
 		for (int i = 0; i < header.chunks; i++)
 		{
-			uint64_t hash = 0;
-			uint64_t size = 0;
+			uint32_t id = 0;
+			uint32_t hash = 0;
+			uint32_t size = 0;
 
-			uint64_t *hashPtr = outPtr++;
-			uint64_t *sizePtr = outPtr++;
+			uint32_t *idPtr = outPtr++;
+			uint32_t *hashPtr = outPtr++;
+			uint32_t *sizePtr = outPtr++;
 
-			hash = be64toh(*hashPtr);
-			size = be64toh(*sizePtr);
+			id = be32toh(*idPtr);
+			hash = be32toh(*hashPtr);
+			size = be32toh(*sizePtr);
 
-			Signature entry = {hash, size};
+			Signature entry = {id, hash, size};
 
 			m_signatures.push_back(entry);
 		}
@@ -174,25 +197,27 @@ public:
 	 *
 	 * @param filename file name
 	 */
-	void save(std::string filename) throw()
+	void save(const std::string &filename) throw()
 	{
 		uint64_t len = sizeof(uint64_t) * m_signatures.size() * 2;
 
 		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
 		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
-		SignatureFileHeader header = {htobe64(MAGIC), htobe64(m_signatures.size())};
+		SignatureFileHeader header = {htobe32(MAGIC), htobe32(m_signatures.size())};
 		std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
 		ofs.write(reinterpret_cast<char *>(&header), sizeof(SignatureFileHeader));
 
-		uint64_t *inPtr = reinterpret_cast<uint64_t *>(in.get());
+		uint32_t *inPtr = reinterpret_cast<uint32_t *>(in.get());
 
 		for (Signature entry : m_signatures)
 		{
-			entry.hash = htobe64(entry.hash);
-			entry.size = htobe64(entry.size);
-			std::memcpy(inPtr++, &entry.hash, sizeof(uint64_t));
-			std::memcpy(inPtr++, &entry.size, sizeof(uint64_t));
+			entry.id = htobe32(entry.id);
+			entry.hash = htobe32(entry.hash);
+			entry.size = htobe32(entry.size);
+			std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
+			std::memcpy(inPtr++, &entry.hash, sizeof(entry.hash));
+			std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
 		}
 
 		uint64_t compressedSize = CompressionService::compress(in.get(), len, out.get(), len);
@@ -211,8 +236,9 @@ public:
 		uint32_t i = 0;
 		for (Signature entry : m_signatures)
 		{
-			printf("chunk %u hash: %lu\n", i, entry.hash);
-			printf("chunk %u size: %lu\n", i++, entry.size);
+			printf("chunk %u id: %u\n", i, entry.id);
+			printf("chunk %u hash: %u\n", i, entry.hash);
+			printf("chunk %u size: %u\n", i++, entry.size);
 		}
 	}
 
@@ -225,23 +251,43 @@ public:
 	}
 
 	/**
-	 * @brief overloading of the subscript operators
+	 * @brief overloading of the subscript operator
 	 * 
 	 * @param pos 
 	 * @return Signature& 
 	 */
-	Signature &operator[]( size_t pos ) {
+	Signature &operator[](size_t pos) {
 		return m_signatures[pos];
 	}
 
-	Signature const &operator[]( size_t pos ) const {
+	template <class Comparator>
+	void sort(const Comparator comp) {
+		std::sort(m_signatures.begin(), m_signatures.end(), comp);
+	}
+
+	/**
+	 * @brief overloading of the subscript operator
+	 * 
+	 * @param pos 
+	 * @return Signature const& 
+	 */
+	Signature const &operator[](size_t pos) const {
 		return m_signatures[pos];
+	}
+
+	/**
+	 * @brief returns the number of signatures
+	 * 
+	 * @return uint32_t 
+	 */
+	uint32_t size() {
+		return m_signatures.size();
 	}
 
 private:
 	std::vector<Signature> m_signatures;
 
-	static constexpr uint64_t MAGIC = 0xC000FFEE;
+	static constexpr uint32_t MAGIC = 0xC000FFEE;
 };
 
 class HashService
@@ -252,7 +298,7 @@ public:
 	 *
 	 * @param data input buffer
 	 * @param size size of the buffer we want to calcute the hash
-	 * @return uint64_t hash value
+	 * @return uint32_t hash value
 	 */
 	static uint32_t hash(uint8_t *data, uint32_t size)
 	{
@@ -268,10 +314,11 @@ public:
 	/**
 	 * @brief compute the hash value for a one-byte-shifted string adding one character
 	 *        (e.g. original string: ABBA, next string: BBAB, chunkSize = 4)
-	 *
+	 * 
 	 * @param data input buffer
 	 * @param size size of the buffer we want to calcute the hash
-	 * @return uint64_t hash value
+	 * @param prevHash previous hash
+	 * @return uint32_t hash value
 	 */
 	static uint32_t rolling_hash(uint8_t* data, uint32_t size, uint32_t prevHash)
 	{
@@ -284,8 +331,9 @@ public:
   		}
 
   		hashValue += M;
-  		hashValue -= (power * data[0]) % M;
+  		hashValue -= ((power * data[0]) % M);
   		hashValue <<= BSHIFT;
+		hashValue %= M;
   		hashValue += data[size];  
   		hashValue %= M;
 
@@ -304,18 +352,16 @@ public:
 	{
 		std::unique_ptr<std::vector<Signature>> signatures(new std::vector<Signature>());
 
-		uint64_t wholeChunks = size / chunkSize;
-		uint8_t *lastChunk = data + wholeChunks * chunkSize;
-		uint64_t lastChunkSize = size % chunkSize;
+		uint32_t chunkId = 0;
+		uint8_t *dataPtr = nullptr;
+		uint8_t *end = data + size - chunkSize;
 
-		for (uint8_t *currentChunk = data, *lastChunk = data + wholeChunks * chunkSize; currentChunk < lastChunk; currentChunk += chunkSize)
-		{
-			Signature entry = {hash(currentChunk, chunkSize), chunkSize};
-			signatures->push_back(entry);
+		for(dataPtr = data ; dataPtr < end; dataPtr += chunkSize, chunkId++) {
+			signatures->push_back({chunkId, hash(dataPtr, chunkSize), chunkSize});
 		}
 
-		Signature entry = {hash(lastChunk, lastChunkSize), lastChunkSize};
-		signatures->push_back(entry);
+		uint32_t lastChunkSize = size % chunkSize;
+		signatures->push_back({chunkId, hash(dataPtr, chunkSize), lastChunkSize});
 
 		return std::move(signatures);
 	}
@@ -336,20 +382,22 @@ public:
 		return true;
 	}
 
-	static uint32_t search(uint8_t *data, uint32_t size, uint8_t *chunk, uint32_t chunkSize)
+	static uint32_t search(uint8_t *data, uint32_t size, uint32_t chunkHash, uint32_t chunkSize)
 	{
-		uint32_t hashChunk = hash(chunk, chunkSize);
-		uint32_t hashData  = hash(data, chunkSize);
+		uint32_t offset = 0;
+		uint32_t dataHash  = hash(data, chunkSize);
+		uint8_t *dataPtr = data;
+		uint8_t *end = dataPtr + size - chunkSize;
 
-		uint32_t i = 0; do
-		{
-			if (hashChunk == hashData)
-			 	if(compare(&data[i], chunk, chunkSize))
-					return i;
+		if (chunkHash == dataHash) return offset;
 
-			hashData = rolling_hash(&data[++i], chunkSize, hashData);
+		for(offset = 1; dataPtr < end; dataPtr++, offset++) {
+			dataHash = rolling_hash(dataPtr, chunkSize, dataHash);
+			if (chunkHash == dataHash) return offset;
 		}
-		while (i < (size - chunkSize));
+
+		dataHash = rolling_hash(dataPtr, size % chunkSize, dataHash);
+		if (chunkHash == dataHash) return offset;
 
 		return size;
 	}
@@ -368,7 +416,7 @@ struct FileHandle
 class FileService
 {
 public:
-	static FileHandle load(std::string filename) throw()
+	static FileHandle load(const std::string &filename) throw()
 	{
 		FileHandle ret;
 
@@ -387,34 +435,57 @@ public:
 	}
 };
 
-static constexpr uint32_t CHUNKSIZ = 0xFFFF;
+class DeltaFile
+{
+public:
+
+	DeltaFile() { }
+
+	DeltaFile(const std::string &filename, const std::string &sigFilename) throw () {
+		signatures.load(sigFilename);
+		fileHandle = FileService::load(filename);
+	}
+
+	~DeltaFile() { }
+
+	void save() {
+		std::vector<Signature> deltaSignatures;
+
+		uint64_t offset = 0; 
+		uint64_t len = fileHandle.size;
+		uint8_t *dataPtr = fileHandle.data.get();
+		uint8_t *end = dataPtr + len;
+
+		for (uint32_t i = 0; i < signatures.size(); dataPtr++, i++) {
+			uint32_t pos = HashService::search(dataPtr, len, signatures[i].hash, signatures[i].size);
+			
+			if (pos < len) {
+				offset += pos;
+				printf("signature %u of %u hash %u size %u off %u\n", signatures[i].id, signatures.size(), signatures[i].hash, signatures[i].size, offset);
+				dataPtr = fileHandle.data.get() + offset + signatures[i].size;
+			}
+		}
+	}
+
+private:
+	SignatureFile signatures;
+	FileHandle    fileHandle;
+};
+
+static constexpr uint32_t CHUNKSIZ = 0xFF;
 
 int main(int argc, const char **argv)
 {
 	FileHandle fileHandle1 = FileService::load("starwars_a_new_hope.txt");
 	FileHandle fileHandle2 = FileService::load("starwars_a_new_hope_modified.txt");
-	std::unique_ptr<std::vector<Signature>> signatures1 = HashService::getSignatures(fileHandle1.data.get(), fileHandle1.size, CHUNKSIZ);
-	std::unique_ptr<std::vector<Signature>> signatures2 = HashService::getSignatures(fileHandle2.data.get(), fileHandle2.size, CHUNKSIZ);
 
-	SignatureService sig1(signatures1);
-	SignatureService sig2(signatures2);
+	std::unique_ptr<std::vector<Signature>> signatures = HashService::getSignatures(fileHandle1.data.get(), fileHandle1.size, CHUNKSIZ);
 
-	sig1.print();
-	sig2.print();
+	printf("creating signature file\n");
+	SignatureFile sig(*signatures.get());
+	printf("saving signature file to disk\n");
+	sig.save("starwars_a_new_hope.sig.bin");
 
-	sig1.save("starwars_a_new_hope.sig.bin");
-	sig2.save("starwars_a_new_hope_modified.sig.bin");
-
-#if 0
-	sig1.load("starwars_a_new_hope.sig.bin");
-	sig2.load("starwars_a_new_hope_modified.sig.bin");
-
-	uint32_t hash = HashService::hash(fileHandle1.data.get(), CHUNKSIZ);
-	uint32_t hashNext = HashService::hash(fileHandle1.data.get() + 1, CHUNKSIZ);
-	uint32_t hashRoll = HashService::rolling_hash(fileHandle1.data.get(), CHUNKSIZ, hash);
-
-	printf("hash: %u\n", hash);
-	printf("hashNext: %u\n", hashNext);
-	printf("hashRoll: %u\n", hashRoll);
-#endif
+	DeltaFile file("starwars_a_new_hope_modified.txt", "starwars_a_new_hope.sig.bin");
+	file.save();
 }
