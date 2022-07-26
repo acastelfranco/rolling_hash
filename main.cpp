@@ -484,6 +484,7 @@ struct Delta {
 struct DeltaFileHeader {
 	uint32_t magic;
 	uint32_t deltas;
+	uint32_t len;
 };
 
 class DeltaFile
@@ -515,12 +516,14 @@ public:
 				if (pos > 0) {
 					printf("adding delta %u offset: %lu size: %u\n", deltaCount, offset, pos);
 					Delta delta;
-					delta.id = deltaCount++;
+					delta.id = deltaCount;
 					delta.pos = offset;
 					delta.command = static_cast<uint32_t>(DeltaCommand::AddChunk);
 					delta.data = fileHandle.data.get() + offset;
 					delta.size = pos;
 					deltas.push_back(delta);
+
+					deltaCount++;
 				}
 				offset += pos;
 				printf("found signature %u of %u at pos %lu expected %u\n", i, signatures.size(), offset, signatures[i].pos);
@@ -528,12 +531,14 @@ public:
 				dataPtr = fileHandle.data.get() + offset;
 			} else {
 				Delta delta;
-				delta.id = deltaCount++;
+				delta.id = deltaCount;
 				delta.pos = signatures[i].pos;
 				delta.command = static_cast<uint32_t>(DeltaCommand::DelChunk);
 				delta.data = nullptr;
 				delta.size = signatures[i].pos;
 				deltas.push_back(delta);
+
+				deltaCount++;
 			}
 		}
 	}
@@ -542,16 +547,23 @@ public:
 
 		uint64_t len = deltas.size() * sizeof(Delta);
 
+		for (Delta entry : deltas)
+			if (entry.data)
+				len += entry.size;
+
 		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
 		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
-		DeltaFileHeader header = {htobe32(MAGIC), htobe32(deltas.size())};
+		DeltaFileHeader header = {htobe32(MAGIC), htobe32(deltas.size()), htobe32(len)};
 		std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
 		ofs.write(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
 
 		uint32_t *inPtr = reinterpret_cast<uint32_t *>(in.get());
 
 		for (Delta entry : deltas) {
+			uint32_t len = entry.size;
+			DeltaCommand cmd = static_cast<DeltaCommand>(entry.command);
+			
 			entry.id = htobe32(entry.id);
 			entry.command = htobe32(entry.command);
 			entry.pos = htobe32(entry.pos);
@@ -561,9 +573,13 @@ public:
 			std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
 			std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
 			
-			if (static_cast<DeltaCommand>(entry.command) == DeltaCommand::AddChunk) {
-				std::memcpy(inPtr, entry.data, entry.size);
-				inPtr += entry.size;
+			if (cmd == DeltaCommand::AddChunk) {
+				std::memcpy(inPtr, entry.data, len);
+				uint8_t *tmp = reinterpret_cast<uint8_t *>(inPtr);
+				tmp += len;
+				inPtr = reinterpret_cast<uint32_t *>(tmp);
+			} else if (cmd == DeltaCommand::DelChunk) {
+				inPtr += 2;
 			}
 		}
 
@@ -585,21 +601,20 @@ public:
 
 		header.magic = be32toh(header.magic);
 		header.deltas = be32toh(header.deltas);
+		header.len = be32toh(header.len);
 
 		if (header.magic != MAGIC)
 			throw DeltaException("invalid magic");
 
-		uint64_t len = header.deltas * sizeof(Delta);
+		std::unique_ptr<uint8_t[]> in(new uint8_t[header.len]);
+		std::unique_ptr<uint8_t[]> out(new uint8_t[header.len]);
 
-		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
-		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
-
-		if (!ifs.good() || len == 0)
+		if (!ifs.good() || header.len == 0)
 			throw MalformedFileException("unexpected length");
 
 		ifs.read(reinterpret_cast<char *>(in.get()), compressedBlobSize);
 
-		uint32_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), len);
+		uint32_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), header.len);
 
 		uint32_t *outPtr = reinterpret_cast<uint32_t *>(out.get());
 
@@ -625,15 +640,32 @@ public:
 			data = nullptr;
 
 			if (command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
-				data = new uint8_t[size];
+				data = std::make_unique<uint8_t[]>(size).get();
 				std::memcpy(data, outPtr, size);
-				outPtr += size;
+				uint8_t *tmp = reinterpret_cast<uint8_t *>(outPtr);
+				tmp += size;
+				outPtr = reinterpret_cast<uint32_t *>(tmp);
+			} else if (command == static_cast<uint32_t>(DeltaCommand::DelChunk)) {
+				outPtr += 2;
 			}
 
 			deltas.push_back({id, command, pos, size, data});
 		}
 
 		ifs.close();
+	}
+
+	void print()
+	{
+		uint32_t i = 0;
+		for (Delta entry : deltas)
+		{
+			printf("delta %u id: %u\n", i, entry.id);
+			printf("delta %u command: %u\n", i, entry.command);
+			printf("delta %u pos: %u\n", i, entry.pos);
+			printf("delta %u size: %u\n", i, entry.size);
+			printf("delta %u data: %p\n", i++, entry.data);
+		}
 	}
 
 private:
@@ -661,9 +693,12 @@ int main(int argc, const char **argv)
 	printf("creating delta file\n");
 	DeltaFile file("starwars_a_new_hope_modified.txt", "starwars_a_new_hope.sig.bin");
 	file.generateDeltas();
+
 	printf("saving delta file to disk\n");
 	file.save("starwars_a_new_hope_modified.deltas.bin");
 
 	printf("loading delta file from disk\n");
 	file.load("starwars_a_new_hope_modified.deltas.bin");
+
+	file.print();
 }
