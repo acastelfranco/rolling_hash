@@ -1,3 +1,19 @@
+## How to
+The environment used to compile this project is Visual Studio Code with g++, cmake on WSL2 on Windows
+
+To compile this project download the repository archive, extract it and create a build directory,
+in the main folder.
+
+Go inside the build directory and execute "cmake .." command and "make -j" command.
+
+The build will produce two executables and a library: backupnrestore, tests and librollinghash.a.
+
+Executing the tests program, the basic rolling hash algorithm will be tested agains a full hash on a same size string. This program uses the catch2 framework to run the tests.
+
+Executing the backupnrestore binary the program will read a reference file (version 1) and it will produce a signature file and a delta file (similarly to the rsync library mentioned in the proposed challenge), to go to a modified version of the version 1 file (version 2).
+
+After that it will restore the version 2 file starting from the version 1 file and the obtained delta file.
+
 # Rolling Hash Algorithm
 _Spec v4 (2021-03-09)_
 
