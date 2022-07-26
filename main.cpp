@@ -532,7 +532,6 @@ public:
 		uint64_t len = fileHandle.size;
 		uint8_t *dataPtr = fileHandle.data.get();
 		uint8_t *end = dataPtr + len;
-		int64_t diff = 0;
 		uint32_t deltaCount = 0;
 
 		for (uint32_t i = 0; i < signatures.size(); i++) {
@@ -542,12 +541,14 @@ public:
 			if (pos < len) {
 				if (pos > 0) {
 					printf("adding delta %u offset: %lu size: %u\n", deltaCount, offset, pos);
-					deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::AddChunk), static_cast<uint32_t>(offset), pos, fileHandle.data.get() + offset });
+					deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::AddChunk),
+						static_cast<uint32_t>(offset), pos, fileHandle.data.get() + offset });
 				}
 
 				offset += pos;
 				printf("found signature %u of %u at pos %lu expected %u\n", i, signatures.size(), offset, signatures[i].pos);
-				deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::KeepChunk), static_cast<uint32_t>(offset), signatures[i].size, nullptr });
+				deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::KeepChunk),
+					signatures[i].pos, signatures[i].size, nullptr });
 				offset += signatures[i].size;
 				dataPtr = fileHandle.data.get() + offset;
 			}
