@@ -200,22 +200,12 @@ public:
 		m_signatures.clear();
 		for (int i = 0; i < header.chunks; i++)
 		{
-			uint32_t id = 0;
-			uint32_t pos = 0;
-			uint32_t hash = 0;
-			uint32_t size = 0;
-
 			uint32_t *idPtr = outPtr++;
 			uint32_t *posPtr = outPtr++;
 			uint32_t *hashPtr = outPtr++;
 			uint32_t *sizePtr = outPtr++;
 
-			id = be32toh(*idPtr);
-			pos = be32toh(*posPtr);
-			hash = be32toh(*hashPtr);
-			size = be32toh(*sizePtr);
-
-			m_signatures.push_back({id, pos, hash, size});
+			m_signatures.push_back({be32toh(*idPtr), be32toh(*posPtr), be32toh(*hashPtr), be32toh(*sizePtr)});
 		}
 
 		ifs.close();
@@ -245,6 +235,7 @@ public:
 			entry.pos = htobe32(entry.pos);
 			entry.hash = htobe32(entry.hash);
 			entry.size = htobe32(entry.size);
+
 			std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
 			std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
 			std::memcpy(inPtr++, &entry.hash, sizeof(entry.hash));
@@ -292,11 +283,6 @@ public:
 		return m_signatures[pos];
 	}
 
-	template <class Comparator>
-	void sort(const Comparator comp) {
-		std::sort(m_signatures.begin(), m_signatures.end(), comp);
-	}
-
 	/**
 	 * @brief overloading of the subscript operator
 	 * 
@@ -305,6 +291,11 @@ public:
 	 */
 	Signature const &operator[](size_t pos) const {
 		return m_signatures[pos];
+	}
+
+	template <class Comparator>
+	void sort(const Comparator comp) {
+		std::sort(m_signatures.begin(), m_signatures.end(), comp);
 	}
 
 	/**
@@ -469,8 +460,8 @@ public:
 };
 
 enum class DeltaCommand {
-	DelChunk,
 	AddChunk,
+	KeepChunk,
 };
 
 struct Delta {
@@ -485,6 +476,42 @@ struct DeltaFileHeader {
 	uint32_t magic;
 	uint32_t deltas;
 	uint32_t len;
+};
+
+class OrderDeltaById
+{
+public:
+    inline bool operator() (const Delta& d1, const Delta& d2)
+    {
+        return (d1.id < d2.id);
+    }
+};
+
+class OrderDeltaByCommand
+{
+public:
+    inline bool operator() (const Delta& d1, const Delta& d2)
+    {
+        return (d1.command < d2.command);
+    }
+};
+
+class OrderDeltaByPos
+{
+public:
+    inline bool operator() (const Delta& d1, const Delta& d2)
+    {
+        return (d1.pos < d2.pos);
+    }
+};
+
+class OrderDeltaBySize
+{
+public:
+    inline bool operator() (const Delta& d1, const Delta& d2)
+    {
+        return (d1.size < d2.size);
+    }
 };
 
 class DeltaFile
@@ -515,30 +542,14 @@ public:
 			if (pos < len) {
 				if (pos > 0) {
 					printf("adding delta %u offset: %lu size: %u\n", deltaCount, offset, pos);
-					Delta delta;
-					delta.id = deltaCount;
-					delta.pos = offset;
-					delta.command = static_cast<uint32_t>(DeltaCommand::AddChunk);
-					delta.data = fileHandle.data.get() + offset;
-					delta.size = pos;
-					deltas.push_back(delta);
-
-					deltaCount++;
+					deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::AddChunk), static_cast<uint32_t>(offset), pos, fileHandle.data.get() + offset });
 				}
+
 				offset += pos;
 				printf("found signature %u of %u at pos %lu expected %u\n", i, signatures.size(), offset, signatures[i].pos);
+				deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::KeepChunk), static_cast<uint32_t>(offset), signatures[i].size, nullptr });
 				offset += signatures[i].size;
 				dataPtr = fileHandle.data.get() + offset;
-			} else {
-				Delta delta;
-				delta.id = deltaCount;
-				delta.pos = signatures[i].pos;
-				delta.command = static_cast<uint32_t>(DeltaCommand::DelChunk);
-				delta.data = nullptr;
-				delta.size = signatures[i].pos;
-				deltas.push_back(delta);
-
-				deltaCount++;
 			}
 		}
 	}
@@ -568,6 +579,7 @@ public:
 			entry.command = htobe32(entry.command);
 			entry.pos = htobe32(entry.pos);
 			entry.size = htobe32(entry.size);
+			
 			std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
 			std::memcpy(inPtr++, &entry.command, sizeof(entry.command));
 			std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
@@ -578,7 +590,7 @@ public:
 				uint8_t *tmp = reinterpret_cast<uint8_t *>(inPtr);
 				tmp += len;
 				inPtr = reinterpret_cast<uint32_t *>(tmp);
-			} else if (cmd == DeltaCommand::DelChunk) {
+			} else if (cmd == DeltaCommand::KeepChunk) {
 				inPtr += 2;
 			}
 		}
@@ -586,13 +598,13 @@ public:
 		uint64_t compressedSize = CompressionService::compress(in.get(), len, out.get(), len);
 		ofs.write(reinterpret_cast<const char *>(out.get()), compressedSize);
 
-		deltas.clear();
+		clear();
 		ofs.close();
 	}
 
 	void load(const std::string &filename) throw()
 	{
-		DeltaFileHeader header = {0};
+		DeltaFileHeader header = { 0 };
 
 		std::ifstream ifs(filename, std::ifstream::in | std::ifstream::ate | std::ifstream::binary);
 		uint64_t compressedBlobSize = static_cast<uint64_t>(ifs.tellg()) - sizeof(DeltaFileHeader);
@@ -618,38 +630,29 @@ public:
 
 		uint32_t *outPtr = reinterpret_cast<uint32_t *>(out.get());
 
-		deltas.clear();
+		clear();
 
 		for (int i = 0; i < header.deltas; i++)
 		{
-			uint32_t id = 0;
-			uint32_t command = 0;
-			uint32_t pos = 0;
-			uint32_t size = 0;
-			uint8_t *data = nullptr;
-
 			uint32_t *idPtr = outPtr++;
 			uint32_t *commandPtr = outPtr++;
 			uint32_t *posPtr = outPtr++;
 			uint32_t *sizePtr = outPtr++;
 
-			id = be32toh(*idPtr);
-			command = be32toh(*commandPtr);
-			pos = be32toh(*posPtr);
-			size = be32toh(*sizePtr);
-			data = nullptr;
+			Delta delta = { be32toh(*idPtr), be32toh(*commandPtr), be32toh(*posPtr), be32toh(*sizePtr), nullptr };
 
-			if (command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
-				data = std::make_unique<uint8_t[]>(size).get();
-				std::memcpy(data, outPtr, size);
+			if (delta.command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
+				delta.data = new uint8_t[delta.size + 1];
+				std::memset(delta.data, 0, delta.size + 1);
+				std::memcpy(delta.data, outPtr, delta.size);
 				uint8_t *tmp = reinterpret_cast<uint8_t *>(outPtr);
-				tmp += size;
+				tmp += delta.size;
 				outPtr = reinterpret_cast<uint32_t *>(tmp);
-			} else if (command == static_cast<uint32_t>(DeltaCommand::DelChunk)) {
+			} else if (delta.command == static_cast<uint32_t>(DeltaCommand::KeepChunk)) {
 				outPtr += 2;
 			}
 
-			deltas.push_back({id, command, pos, size, data});
+			deltas.push_back(delta);
 		}
 
 		ifs.close();
@@ -666,6 +669,41 @@ public:
 			printf("delta %u size: %u\n", i, entry.size);
 			printf("delta %u data: %p\n", i++, entry.data);
 		}
+	}
+
+	void clear() {
+		deltas.clear();
+	}
+
+	/**
+	 * @brief overloading of the subscript operator
+	 * 
+	 * @param pos 
+	 * @return Delta& 
+	 */
+	Delta &operator[](size_t pos) {
+		
+		return deltas[pos];
+	}
+
+	/**
+	 * @brief overloading of the subscript operator
+	 * 
+	 * @param pos 
+	 * @return Signature const& 
+	 */
+	Delta const &operator[](size_t pos) const {
+		printf("calling const operator\n");
+		return deltas[pos];
+	}
+
+	uint32_t size() const {
+		return deltas.size();
+	}
+
+	template <class Comparator>
+	void sort(const Comparator comp) {
+		std::sort(deltas.begin(), deltas.end(), comp);
 	}
 
 private:
@@ -696,6 +734,27 @@ public:
 		printf("saving delta file to disk\n");
 		file.save(fileVer2 + ".deltas.bin");
 	}
+
+	static void restore(const std::string &fileVer1, const std::string &deltaFile, const std::string &destination) throw () {
+		DeltaFile delta;
+		FileHandle fileHandle = FileService::load(fileVer1);
+		std::ofstream ofs(destination, std::ofstream::out | std::ofstream::binary);
+
+		printf("load delta file to disk\n");
+		delta.load(deltaFile);
+
+		for(uint32_t i = 0; i < delta.size(); i++) {
+			if (delta[i].command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
+				ofs.write(reinterpret_cast<const char*>(delta[i].data), delta[i].size);
+			} else if (delta[i].command == static_cast<uint32_t>(DeltaCommand::KeepChunk)) {
+				ofs.write(reinterpret_cast<const char*>(fileHandle.data.get() + delta[i].pos), delta[i].size);
+			} else {
+				throw DeltaException("invalid command");
+			}
+		}
+
+		ofs.close();
+	}
 };
 
 static constexpr uint32_t CHUNKSIZ = 0xFF;
@@ -703,4 +762,5 @@ static constexpr uint32_t CHUNKSIZ = 0xFF;
 int main(int argc, const char **argv)
 {
 	BackupService::backup("starwars_a_new_hope.txt", "starwars_a_new_hope_modified.txt", CHUNKSIZ);
+	BackupService::restore("starwars_a_new_hope.txt", "starwars_a_new_hope_modified.txt.deltas.bin", "new_starwars_story.txt");
 }
