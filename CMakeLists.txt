@@ -8,7 +8,6 @@ add_compile_options(-g -O3 -Wno-terminate)
 set (SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SignatureFile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DeltaFile.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/app/main.cpp
 )
 
 set (HEADERS
@@ -23,46 +22,54 @@ set (HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/DeltaFile.h
 )
 
-#set (TESTS
-#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/catch.hpp
-#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.h
-#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.cpp
- #   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test0001.cpp
-#)
-
-# add the executable
-add_executable(rollinghash ${SOURCES} ${HEADERS})
+add_library (rollinghash ${SOURCES} ${HEADERS})
 
 target_include_directories(rollinghash
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(rollinghash PRIVATE z)
+add_executable(backupnrestore 
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/main.cpp
+    ${HEADERS})
+
+target_include_directories(backupnrestore
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(backupnrestore PRIVATE rollinghash z)
 
 add_custom_command(
-    TARGET rollinghash
+    TARGET backupnrestore
     POST_BUILD
     COMMAND ${CMAKE_COMMAND}
     ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope.txt
 )
 
 add_custom_command(
-    TARGET rollinghash
+    TARGET backupnrestore
     POST_BUILD
     COMMAND ${CMAKE_COMMAND}
     ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope_modified.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope_modified.txt
 )
 
-#add_executable (tests ${TESTS} ${HEADERS})
+set (TESTS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/catch.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test0001.cpp
+)
 
-#target_include_directories(tests
-#    PRIVATE
-#    ${CMAKE_CURRENT_SOURCE_DIR}/include
-#    ${CMAKE_CURRENT_SOURCE_DIR}/tests
-#)
+add_executable (tests ${TESTS} ${HEADERS})
 
-#target_link_libraries(tests PRIVATE z)
+target_include_directories(tests
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+)
+
+target_link_libraries(tests PRIVATE rollinghash z)
 
 option (BUILD_DOC "Build documentation" ON)
 

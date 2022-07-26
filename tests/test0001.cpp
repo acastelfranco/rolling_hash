@@ -4,11 +4,17 @@ TEST_CASE( "[test 1] Test hash and rolling hash", "[test 1]")
 {
     SECTION("compare hash with rolling hash")
     {
-        Endpoint_H start(new Endpoint(Vector(0, 0, 0)));
-        Endpoint_H end  (new Endpoint(Vector(3, 4, 0)));
+        std::string thelightside = "gandalf";
+        std::string thedarkside  = "sauron";
+        
+        uint32_t hashLightBase = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thelightside.c_str())), 6);
+        uint32_t hashLightFull = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thelightside.c_str() + 1)), 6);
+        uint32_t hashLightRoll = HashService::rolling_hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thelightside.c_str())), 6, hashLightBase);
+    
+        CHECK(hashLightFull == hashLightRoll);
 
-        Segment_H segment(new Segment(start, end));
-
-        CHECK(segment->lenght() == 5.0);
+        uint32_t hashDarkBase = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str())), 4);
+        uint32_t hashDarkFull = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str() + 1)), 4);
+        uint32_t hashDarkRoll = HashService::rolling_hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str())), 4, hashDarkBase);
     }
 }

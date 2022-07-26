@@ -1,5 +1,6 @@
 #pragma once
 
+#include <catch.hpp>
 #include <Delta.h>
 #include <DeltaFile.h>
 #include <Signature.h>
