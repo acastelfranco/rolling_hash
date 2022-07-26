@@ -12,6 +12,7 @@
 #include <endian.h>
 #include <zlib.h>
 #include <algorithm>
+#include <cstdlib>
 
 class CompressionService
 {
@@ -86,6 +87,7 @@ public:
 struct Signature
 {
 	uint32_t id;
+	uint32_t pos;
 	uint32_t hash;
 	uint32_t size;
 };
@@ -94,6 +96,25 @@ struct SignatureFileHeader
 {
 	uint32_t magic;
 	uint32_t chunks;
+};
+
+
+class OrderSignatureById
+{
+public:
+    inline bool operator() (const Signature& sig1, const Signature& sig2)
+    {
+        return (sig1.id < sig2.id);
+    }
+};
+
+class OrderSignatureByPos
+{
+public:
+    inline bool operator() (const Signature& sig1, const Signature& sig2)
+    {
+        return (sig1.pos < sig2.pos);
+    }
 };
 
 class OrderSignatureByHash
@@ -105,12 +126,12 @@ public:
     }
 };
 
-class OrderSignatureById
+class OrderSignatureBySize
 {
 public:
     inline bool operator() (const Signature& sig1, const Signature& sig2)
     {
-        return (sig1.id < sig2.id);
+        return (sig1.size < sig2.size);
     }
 };
 
@@ -173,20 +194,21 @@ public:
 		for (int i = 0; i < header.chunks; i++)
 		{
 			uint32_t id = 0;
+			uint32_t pos = 0;
 			uint32_t hash = 0;
 			uint32_t size = 0;
 
 			uint32_t *idPtr = outPtr++;
+			uint32_t *posPtr = outPtr++;
 			uint32_t *hashPtr = outPtr++;
 			uint32_t *sizePtr = outPtr++;
 
 			id = be32toh(*idPtr);
+			pos = be32toh(*posPtr);
 			hash = be32toh(*hashPtr);
 			size = be32toh(*sizePtr);
 
-			Signature entry = {id, hash, size};
-
-			m_signatures.push_back(entry);
+			m_signatures.push_back({id, pos, hash, size});
 		}
 
 		ifs.close();
@@ -199,7 +221,7 @@ public:
 	 */
 	void save(const std::string &filename) throw()
 	{
-		uint64_t len = sizeof(uint64_t) * m_signatures.size() * 2;
+		uint64_t len = m_signatures.size() * sizeof(Signature);
 
 		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
 		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
@@ -213,9 +235,11 @@ public:
 		for (Signature entry : m_signatures)
 		{
 			entry.id = htobe32(entry.id);
+			entry.pos = htobe32(entry.pos);
 			entry.hash = htobe32(entry.hash);
 			entry.size = htobe32(entry.size);
 			std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
+			std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
 			std::memcpy(inPtr++, &entry.hash, sizeof(entry.hash));
 			std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
 		}
@@ -237,6 +261,7 @@ public:
 		for (Signature entry : m_signatures)
 		{
 			printf("chunk %u id: %u\n", i, entry.id);
+			printf("chunk %u pos: %u\n", i, entry.pos);
 			printf("chunk %u hash: %u\n", i, entry.hash);
 			printf("chunk %u size: %u\n", i++, entry.size);
 		}
@@ -357,11 +382,11 @@ public:
 		uint8_t *end = data + size - chunkSize;
 
 		for(dataPtr = data ; dataPtr < end; dataPtr += chunkSize, chunkId++) {
-			signatures->push_back({chunkId, hash(dataPtr, chunkSize), chunkSize});
+			signatures->push_back({chunkId, static_cast<uint32_t>(dataPtr - data), hash(dataPtr, chunkSize), chunkSize});
 		}
 
 		uint32_t lastChunkSize = size % chunkSize;
-		signatures->push_back({chunkId, hash(dataPtr, chunkSize), lastChunkSize});
+		signatures->push_back({chunkId, static_cast<uint32_t>(dataPtr - data), hash(dataPtr, lastChunkSize), lastChunkSize});
 
 		return std::move(signatures);
 	}
@@ -402,8 +427,9 @@ public:
 		return size;
 	}
 
-	static constexpr uint32_t B = 256;
 	static constexpr uint32_t BSHIFT = 8;
+	
+	static constexpr uint32_t B = 1 << BSHIFT;
 	static constexpr uint32_t M = 4294967291;
 };
 
@@ -435,6 +461,24 @@ public:
 	}
 };
 
+enum class DeltaCommand {
+	DelChunk,
+	AddChunk,
+};
+
+struct Delta {
+	uint32_t id;
+	uint32_t command;
+	uint32_t pos;
+	uint32_t size;
+	uint8_t  *data;
+};
+
+struct DeltaFileHeader {
+	uint32_t magic;
+	uint32_t deltas;
+};
+
 class DeltaFile
 {
 public:
@@ -448,28 +492,91 @@ public:
 
 	~DeltaFile() { }
 
-	void save() {
-		std::vector<Signature> deltaSignatures;
-
+	void generateDeltas() {
 		uint64_t offset = 0; 
 		uint64_t len = fileHandle.size;
 		uint8_t *dataPtr = fileHandle.data.get();
 		uint8_t *end = dataPtr + len;
+		int64_t diff = 0;
+		uint32_t deltaCount = 0;
 
-		for (uint32_t i = 0; i < signatures.size(); dataPtr++, i++) {
+		for (uint32_t i = 0; i < signatures.size(); i++) {
+			len = fileHandle.size - (dataPtr - fileHandle.data.get());
 			uint32_t pos = HashService::search(dataPtr, len, signatures[i].hash, signatures[i].size);
 			
 			if (pos < len) {
+				if (pos > 0) {
+					printf("adding delta %u offset: %lu size: %u\n", deltaCount, offset, pos);
+					Delta delta;
+					delta.id = deltaCount++;
+					delta.pos = offset;
+					delta.command = static_cast<uint32_t>(DeltaCommand::AddChunk);
+					delta.data = fileHandle.data.get() + offset;
+					delta.size = pos;
+					deltas.push_back(delta);
+				}
 				offset += pos;
-				printf("signature %u of %u hash %u size %u off %u\n", signatures[i].id, signatures.size(), signatures[i].hash, signatures[i].size, offset);
-				dataPtr = fileHandle.data.get() + offset + signatures[i].size;
+				printf("found signature %u of %u at pos %lu expected %u\n", i, signatures.size(), offset, signatures[i].pos);
+				offset += signatures[i].size;
+				dataPtr = fileHandle.data.get() + offset;
+			} else {
+				Delta delta;
+				delta.id = deltaCount++;
+				delta.pos = signatures[i].pos;
+				delta.command = static_cast<uint32_t>(DeltaCommand::DelChunk);
+				delta.data = nullptr;
+				delta.size = signatures[i].pos;
+				deltas.push_back(delta);
 			}
 		}
+	}
+
+	void save(const std::string &filename) throw() {
+
+		uint64_t len = deltas.size() * sizeof(Delta);
+
+		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
+		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
+
+		DeltaFileHeader header = {htobe32(MAGIC), htobe32(deltas.size())};
+		std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
+		ofs.write(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
+
+		uint32_t *inPtr = reinterpret_cast<uint32_t *>(in.get());
+
+		for (Delta entry : deltas) {
+			entry.id = htobe32(entry.id);
+			entry.command = htobe32(entry.command);
+			entry.pos = htobe32(entry.pos);
+			entry.size = htobe32(entry.size);
+			std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
+			std::memcpy(inPtr++, &entry.command, sizeof(entry.command));
+			std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
+			std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
+			
+			if (static_cast<DeltaCommand>(entry.command) == DeltaCommand::AddChunk) {
+				std::memcpy(inPtr, entry.data, entry.size);
+				inPtr += entry.size;
+			}
+		}
+
+		uint64_t compressedSize = CompressionService::compress(in.get(), len, out.get(), len);
+		ofs.write(reinterpret_cast<const char *>(out.get()), compressedSize);
+
+		deltas.clear();
+		ofs.close();
+	}
+
+	void load() {
+
 	}
 
 private:
 	SignatureFile signatures;
 	FileHandle    fileHandle;
+	std::vector<Delta> deltas;
+
+	static constexpr uint32_t MAGIC = 0xDEADBEEF;
 };
 
 static constexpr uint32_t CHUNKSIZ = 0xFF;
@@ -486,6 +593,8 @@ int main(int argc, const char **argv)
 	printf("saving signature file to disk\n");
 	sig.save("starwars_a_new_hope.sig.bin");
 
+	printf("creating delta file\n");
 	DeltaFile file("starwars_a_new_hope_modified.txt", "starwars_a_new_hope.sig.bin");
-	file.save();
+	printf("saving delta file to disk\n");
+	file.save("starwars_a_new_hope_modified.deltas.bin");
 }
