@@ -676,29 +676,31 @@ private:
 	static constexpr uint32_t MAGIC = 0xDEADBEEF;
 };
 
+class BackupService {
+public:
+	static void backup(const std::string &fileVer1, const std::string &fileVer2, uint32_t chunckSize) {
+		FileHandle fileHandle1 = FileService::load(fileVer1);
+		FileHandle fileHandle2 = FileService::load(fileVer2);
+
+		std::unique_ptr<std::vector<Signature>> signatures = HashService::getSignatures(fileHandle1.data.get(), fileHandle1.size, chunckSize);
+
+		printf("creating signature file\n");
+		SignatureFile sig(*signatures.get());
+		printf("saving signature file to disk\n");
+		sig.save(fileVer1 + ".sig.bin");
+
+		printf("creating delta file\n");
+		DeltaFile file(fileVer2, fileVer1 + ".sig.bin");
+		file.generateDeltas();
+
+		printf("saving delta file to disk\n");
+		file.save(fileVer2 + ".deltas.bin");
+	}
+};
+
 static constexpr uint32_t CHUNKSIZ = 0xFF;
 
 int main(int argc, const char **argv)
 {
-	FileHandle fileHandle1 = FileService::load("starwars_a_new_hope.txt");
-	FileHandle fileHandle2 = FileService::load("starwars_a_new_hope_modified.txt");
-
-	std::unique_ptr<std::vector<Signature>> signatures = HashService::getSignatures(fileHandle1.data.get(), fileHandle1.size, CHUNKSIZ);
-
-	printf("creating signature file\n");
-	SignatureFile sig(*signatures.get());
-	printf("saving signature file to disk\n");
-	sig.save("starwars_a_new_hope.sig.bin");
-
-	printf("creating delta file\n");
-	DeltaFile file("starwars_a_new_hope_modified.txt", "starwars_a_new_hope.sig.bin");
-	file.generateDeltas();
-
-	printf("saving delta file to disk\n");
-	file.save("starwars_a_new_hope_modified.deltas.bin");
-
-	printf("loading delta file from disk\n");
-	file.load("starwars_a_new_hope_modified.deltas.bin");
-
-	file.print();
+	BackupService::backup("starwars_a_new_hope.txt", "starwars_a_new_hope_modified.txt", CHUNKSIZ);
 }
