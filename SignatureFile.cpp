@@ -24,6 +24,7 @@ void SignatureFile::load(const std::string &filename) throw()
     ifs.seekg(std::ifstream::beg);
     ifs.read(reinterpret_cast<char *>(&header), sizeof(SignatureFileHeader));
 
+    /** endianess is just for mental sanity while debugging. we can remove it **/
     header.magic = be32toh(header.magic);
     header.chunks = be32toh(header.chunks);
 
@@ -52,6 +53,7 @@ void SignatureFile::load(const std::string &filename) throw()
         uint32_t *hashPtr = outPtr++;
         uint32_t *sizePtr = outPtr++;
 
+        /** endianess is just for mental sanity while debugging. we can remove it **/
         m_signatures.push_back({be32toh(*idPtr), be32toh(*posPtr), be32toh(*hashPtr), be32toh(*sizePtr)});
     }
 
@@ -65,6 +67,7 @@ void SignatureFile::save(const std::string &filename) throw()
     std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
     std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
+    /** endianess is just for mental sanity while debugging. we can remove it **/
     SignatureFileHeader header = {htobe32(MAGIC), htobe32(m_signatures.size())};
     std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
     ofs.write(reinterpret_cast<char *>(&header), sizeof(SignatureFileHeader));
@@ -73,6 +76,7 @@ void SignatureFile::save(const std::string &filename) throw()
 
     for (Signature entry : m_signatures)
     {
+        /** endianess is just for mental sanity while debugging. we can remove it **/
         entry.id = htobe32(entry.id);
         entry.pos = htobe32(entry.pos);
         entry.hash = htobe32(entry.hash);

@@ -127,6 +127,7 @@ private:
 	SignatureFile signatures;
 	FileHandle    fileHandle;
 	std::vector<Delta> deltas;
+    std::unique_ptr<uint8_t []> deltaBuffer;
 
 	static constexpr uint32_t MAGIC = 0xDEADBEEF;
 };

@@ -49,6 +49,7 @@ void DeltaFile::save(const std::string &filename) throw() {
     std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
     std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
+    /** endianess is just for mental sanity while debugging. we can remove it **/
     DeltaFileHeader header = {htobe32(MAGIC), htobe32(deltas.size()), htobe32(len)};
     std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
     ofs.write(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
@@ -59,6 +60,7 @@ void DeltaFile::save(const std::string &filename) throw() {
         uint32_t len = entry.size;
         DeltaCommand cmd = static_cast<DeltaCommand>(entry.command);
         
+        /** endianess is just for mental sanity while debugging. we can remove it **/
         entry.id = htobe32(entry.id);
         entry.command = htobe32(entry.command);
         entry.pos = htobe32(entry.pos);
@@ -95,6 +97,7 @@ void DeltaFile::load(const std::string &filename) throw()
     ifs.seekg(std::ifstream::beg);
     ifs.read(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
 
+    /** endianess is just for mental sanity while debugging. we can remove it **/
     header.magic = be32toh(header.magic);
     header.deltas = be32toh(header.deltas);
     header.len = be32toh(header.len);
@@ -123,10 +126,13 @@ void DeltaFile::load(const std::string &filename) throw()
         uint32_t *posPtr = outPtr++;
         uint32_t *sizePtr = outPtr++;
 
+        /** endianess is just for mental sanity while debugging. we can remove it **/
         Delta delta = { be32toh(*idPtr), be32toh(*commandPtr), be32toh(*posPtr), be32toh(*sizePtr), nullptr };
 
         if (delta.command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
-            delta.data = new uint8_t[delta.size + 1];
+            deltaBuffer.release();
+            deltaBuffer = std::make_unique<uint8_t[]>(delta.size + 1);
+            delta.data = deltaBuffer.get();
             std::memset(delta.data, 0, delta.size + 1);
             std::memcpy(delta.data, outPtr, delta.size);
             uint8_t *tmp = reinterpret_cast<uint8_t *>(outPtr);
