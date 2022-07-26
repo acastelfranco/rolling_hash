@@ -3,10 +3,23 @@ cmake_minimum_required(VERSION 3.10)
 # set the project name
 project(rollinghash)
 
-add_compile_options(-g3 -O0 -Wno-terminate)
+add_compile_options(-g -O3 -I${CMAKE_SOURCE_DIR} -Wno-terminate)
 
 # add the executable
-add_executable(rollinghash main.cpp)
+add_executable(rollinghash
+    BackupService.h
+    CompressionService.h
+    Exceptions.h
+    Signature.h
+    SignatureFile.h
+    SignatureFile.cpp
+    HashService.h
+    FileService.h
+    Delta.h
+    DeltaFile.h
+    DeltaFile.cpp
+    main.cpp
+)
 
 target_link_libraries(rollinghash PRIVATE z)
 
