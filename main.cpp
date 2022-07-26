@@ -595,6 +595,7 @@ int main(int argc, const char **argv)
 
 	printf("creating delta file\n");
 	DeltaFile file("starwars_a_new_hope_modified.txt", "starwars_a_new_hope.sig.bin");
+	file.generateDeltas();
 	printf("saving delta file to disk\n");
 	file.save("starwars_a_new_hope_modified.deltas.bin");
 }
