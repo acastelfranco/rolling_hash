@@ -70,6 +70,13 @@ public:
 	}
 };
 
+class DeltaException : public std::runtime_error
+{
+public:
+	DeltaException(const std::string &msg) : std::runtime_error(msg) {}
+	virtual ~DeltaException() {};
+};
+
 class SignatureException : public std::runtime_error
 {
 public:
@@ -567,8 +574,66 @@ public:
 		ofs.close();
 	}
 
-	void load() {
+	void load(const std::string &filename) throw()
+	{
+		DeltaFileHeader header = {0};
 
+		std::ifstream ifs(filename, std::ifstream::in | std::ifstream::ate | std::ifstream::binary);
+		uint64_t compressedBlobSize = static_cast<uint64_t>(ifs.tellg()) - sizeof(DeltaFileHeader);
+		ifs.seekg(std::ifstream::beg);
+		ifs.read(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
+
+		header.magic = be32toh(header.magic);
+		header.deltas = be32toh(header.deltas);
+
+		if (header.magic != MAGIC)
+			throw DeltaException("invalid magic");
+
+		uint64_t len = header.deltas * sizeof(Delta);
+
+		std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
+		std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
+
+		if (!ifs.good() || len == 0)
+			throw MalformedFileException("unexpected length");
+
+		ifs.read(reinterpret_cast<char *>(in.get()), compressedBlobSize);
+
+		uint32_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), len);
+
+		uint32_t *outPtr = reinterpret_cast<uint32_t *>(out.get());
+
+		deltas.clear();
+
+		for (int i = 0; i < header.deltas; i++)
+		{
+			uint32_t id = 0;
+			uint32_t command = 0;
+			uint32_t pos = 0;
+			uint32_t size = 0;
+			uint8_t *data = nullptr;
+
+			uint32_t *idPtr = outPtr++;
+			uint32_t *commandPtr = outPtr++;
+			uint32_t *posPtr = outPtr++;
+			uint32_t *sizePtr = outPtr++;
+
+			id = be32toh(*idPtr);
+			command = be32toh(*commandPtr);
+			pos = be32toh(*posPtr);
+			size = be32toh(*sizePtr);
+			data = nullptr;
+
+			if (command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
+				data = new uint8_t[size];
+				std::memcpy(data, outPtr, size);
+				outPtr += size;
+			}
+
+			deltas.push_back({id, command, pos, size, data});
+		}
+
+		ifs.close();
 	}
 
 private:
@@ -598,4 +663,7 @@ int main(int argc, const char **argv)
 	file.generateDeltas();
 	printf("saving delta file to disk\n");
 	file.save("starwars_a_new_hope_modified.deltas.bin");
+
+	printf("loading delta file from disk\n");
+	file.load("starwars_a_new_hope_modified.deltas.bin");
 }
