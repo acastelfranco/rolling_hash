@@ -3,22 +3,39 @@ cmake_minimum_required(VERSION 3.10)
 # set the project name
 project(rollinghash)
 
-add_compile_options(-g -O3 -I${CMAKE_SOURCE_DIR} -Wno-terminate)
+add_compile_options(-g -O3 -Wno-terminate)
+
+set (SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SignatureFile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/DeltaFile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/app/main.cpp
+)
+
+set (HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/BackupService.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/CompressionService.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Exceptions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Signature.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/SignatureFile.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/HashService.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/FileService.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Delta.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/DeltaFile.h
+)
+
+#set (TESTS
+#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/catch.hpp
+#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.h
+#    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tests.cpp
+ #   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test0001.cpp
+#)
 
 # add the executable
-add_executable(rollinghash
-    BackupService.h
-    CompressionService.h
-    Exceptions.h
-    Signature.h
-    SignatureFile.h
-    SignatureFile.cpp
-    HashService.h
-    FileService.h
-    Delta.h
-    DeltaFile.h
-    DeltaFile.cpp
-    main.cpp
+add_executable(rollinghash ${SOURCES} ${HEADERS})
+
+target_include_directories(rollinghash
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(rollinghash PRIVATE z)
@@ -36,6 +53,16 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND}
     ARGS -E copy ${CMAKE_SOURCE_DIR}/starwars_a_new_hope_modified.txt ${CMAKE_BINARY_DIR}/starwars_a_new_hope_modified.txt
 )
+
+#add_executable (tests ${TESTS} ${HEADERS})
+
+#target_include_directories(tests
+#    PRIVATE
+#    ${CMAKE_CURRENT_SOURCE_DIR}/include
+#    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+#)
+
+#target_link_libraries(tests PRIVATE z)
 
 option (BUILD_DOC "Build documentation" ON)
 
