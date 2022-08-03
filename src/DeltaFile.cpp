@@ -57,7 +57,7 @@ void DeltaFile::save(const std::string &filename) throw() {
     uint32_t *inPtr = reinterpret_cast<uint32_t *>(in.get());
 
     for (Delta entry : deltas) {
-        uint32_t len = entry.size;
+        uint32_t size = entry.size;
         DeltaCommand cmd = static_cast<DeltaCommand>(entry.command);
         
         /** endianess is just for mental sanity while debugging. we can remove it **/
@@ -72,17 +72,24 @@ void DeltaFile::save(const std::string &filename) throw() {
         std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
         
         if (cmd == DeltaCommand::AddChunk) {
-            std::memcpy(inPtr, entry.data, len);
+            std::memcpy(inPtr, entry.data, size);
             uint8_t *tmp = reinterpret_cast<uint8_t *>(inPtr);
-            tmp += len;
+            tmp += size;
             inPtr = reinterpret_cast<uint32_t *>(tmp);
         } else if (cmd == DeltaCommand::KeepChunk) {
             inPtr += 2;
         }
     }
 
-    uint64_t compressedSize = CompressionService::compress(in.get(), len, out.get(), len);
-    ofs.write(reinterpret_cast<const char *>(out.get()), compressedSize);
+#define COMPRESSED 0
+#if COMPRESSED
+    const char *stream = reinterpret_cast<const char *>(out.get());
+    uint64_t streamSize = CompressionService::compress(in.get(), len, out.get(), len);
+#else
+    const char *stream = reinterpret_cast<const char *>(in.get());
+    uint64_t streamSize = len;
+#endif
+    ofs.write(stream, streamSize);
 
     clear();
     ofs.close();
@@ -93,7 +100,7 @@ void DeltaFile::load(const std::string &filename) throw()
     DeltaFileHeader header = { 0 };
 
     std::ifstream ifs(filename, std::ifstream::in | std::ifstream::ate | std::ifstream::binary);
-    uint64_t compressedBlobSize = static_cast<uint64_t>(ifs.tellg()) - sizeof(DeltaFileHeader);
+    uint64_t dataSize = static_cast<uint64_t>(ifs.tellg()) - sizeof(DeltaFileHeader);
     ifs.seekg(std::ifstream::beg);
     ifs.read(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
 
@@ -108,14 +115,17 @@ void DeltaFile::load(const std::string &filename) throw()
     std::unique_ptr<uint8_t[]> in(new uint8_t[header.len]);
     std::unique_ptr<uint8_t[]> out(new uint8_t[header.len]);
 
-    if (!ifs.good() || header.len == 0)
+    if (!ifs.good() || header.len == 0 || dataSize != header.len)
         throw MalformedFileException("unexpected length");
 
-    ifs.read(reinterpret_cast<char *>(in.get()), compressedBlobSize);
+    ifs.read(reinterpret_cast<char *>(in.get()), header.len);
 
-    uint32_t decompressedSize = CompressionService::decompress(in.get(), compressedBlobSize, out.get(), header.len);
-
+#if COMPRESSED
+    CompressionService::decompress(in.get(), dataSize, out.get(), header.len);
     uint32_t *outPtr = reinterpret_cast<uint32_t *>(out.get());
+#else
+    uint32_t *outPtr = reinterpret_cast<uint32_t *>(in.get());
+#endif
 
     clear();
 
