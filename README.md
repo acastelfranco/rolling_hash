@@ -1,5 +1,5 @@
 ## How to
-The environment used to compile this project is Visual Studio Code with g++, cmake on WSL2 on Windows
+The environment used to compile this project is Visual Studio Code with g++ and cmake on both WSL2 on Windows and Linux
 
 To compile this project download the repository archive, extract it and create a build directory,
 in the main folder.
