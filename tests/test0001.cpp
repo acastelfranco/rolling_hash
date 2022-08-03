@@ -16,5 +16,7 @@ TEST_CASE( "[test 1] Test hash and rolling hash", "[test 1]")
         uint32_t hashDarkBase = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str())), 4);
         uint32_t hashDarkFull = HashService::hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str() + 1)), 4);
         uint32_t hashDarkRoll = HashService::rolling_hash(reinterpret_cast<uint8_t*>(const_cast<char *>(thedarkside.c_str())), 4, hashDarkBase);
+
+        CHECK(hashDarkFull == hashDarkRoll);
     }
 }
