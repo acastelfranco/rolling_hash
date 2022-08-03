@@ -60,7 +60,6 @@ void DeltaFile::save(const std::string &filename) throw() {
     std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
     std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
-    /** endianess is just for mental sanity while debugging. we can remove it **/
     DeltaFileHeader header = {MAGIC, static_cast<uint32_t>(deltas.size()), static_cast<uint32_t>(len)};
     std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
     ofs.write(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
@@ -135,7 +134,6 @@ void DeltaFile::load(const std::string &filename) throw()
         uint32_t *posPtr = outPtr++;
         uint32_t *sizePtr = outPtr++;
 
-        /** endianess is just for mental sanity while debugging. we can remove it **/
         Delta delta;
         
         delta.id = *idPtr;
