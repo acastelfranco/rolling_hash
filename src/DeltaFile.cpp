@@ -24,14 +24,25 @@ void DeltaFile::generateDeltas() {
         if (pos < len) {
             if (pos > 0) {
                 printf("adding delta %u offset: %lu size: %u\n", deltaCount, offset, pos);
-                deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::AddChunk),
-                    static_cast<uint32_t>(offset), pos, fileHandle.data.get() + offset });
+                Delta delta;
+                delta.id = deltaCount++;
+                delta.command = DeltaCommand::AddChunk;
+                delta.pos = static_cast<uint32_t>(offset);
+                delta.size = pos;
+                delta.data = std::make_unique<uint8_t []>(pos);
+                std::memcpy(delta.data.get(), fileHandle.data.get() + offset, pos);
+                deltas.push_back(std::move(delta));
             }
 
+            Delta delta;
+            delta.id = deltaCount++;
+            delta.command = DeltaCommand::KeepChunk;
+            delta.pos = signatures[i].pos;
+            delta.size = signatures[i].size;
+            delta.data = nullptr;
             offset += pos;
             printf("found signature %u of %u at pos %lu expected %u\n", i, signatures.size(), offset, signatures[i].pos);
-            deltas.push_back({ deltaCount++, static_cast<uint32_t>(DeltaCommand::KeepChunk),
-                signatures[i].pos, signatures[i].size, nullptr });
+            deltas.push_back(std::move(delta));
             offset += signatures[i].size;
             dataPtr = fileHandle.data.get() + offset;
         }
@@ -42,41 +53,34 @@ void DeltaFile::save(const std::string &filename) throw() {
 
     uint64_t len = deltas.size() * sizeof(Delta);
 
-    for (Delta entry : deltas)
-        if (entry.data)
-            len += entry.size;
+    for (uint32_t i = 0; i < deltas.size(); i++)
+        if (deltas[i].data.get())
+            len += deltas[i].size;
 
     std::unique_ptr<uint8_t[]> in(new uint8_t[len]);
     std::unique_ptr<uint8_t[]> out(new uint8_t[len]);
 
     /** endianess is just for mental sanity while debugging. we can remove it **/
-    DeltaFileHeader header = {htobe32(MAGIC), htobe32(deltas.size()), htobe32(len)};
+    DeltaFileHeader header = {MAGIC, static_cast<uint32_t>(deltas.size()), static_cast<uint32_t>(len)};
     std::ofstream ofs(filename, std::ofstream::out | std::ofstream::binary);
     ofs.write(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
 
     uint32_t *inPtr = reinterpret_cast<uint32_t *>(in.get());
 
-    for (Delta entry : deltas) {
-        uint32_t size = entry.size;
-        DeltaCommand cmd = static_cast<DeltaCommand>(entry.command);
+     for (uint32_t i = 0; i < deltas.size(); i++) {
+        uint32_t size = deltas[i].size;
         
-        /** endianess is just for mental sanity while debugging. we can remove it **/
-        entry.id = htobe32(entry.id);
-        entry.command = htobe32(entry.command);
-        entry.pos = htobe32(entry.pos);
-        entry.size = htobe32(entry.size);
+        std::memcpy(inPtr++, &deltas[i].id, sizeof(deltas[i].id));
+        std::memcpy(inPtr++, &deltas[i].command, sizeof(deltas[i].command));
+        std::memcpy(inPtr++, &deltas[i].pos, sizeof(deltas[i].pos));
+        std::memcpy(inPtr++, &deltas[i].size, sizeof(deltas[i].size));
         
-        std::memcpy(inPtr++, &entry.id, sizeof(entry.id));
-        std::memcpy(inPtr++, &entry.command, sizeof(entry.command));
-        std::memcpy(inPtr++, &entry.pos, sizeof(entry.pos));
-        std::memcpy(inPtr++, &entry.size, sizeof(entry.size));
-        
-        if (cmd == DeltaCommand::AddChunk) {
-            std::memcpy(inPtr, entry.data, size);
+        if (deltas[i].command == DeltaCommand::AddChunk) {
+            std::memcpy(inPtr, deltas[i].data.get(), size);
             uint8_t *tmp = reinterpret_cast<uint8_t *>(inPtr);
             tmp += size;
             inPtr = reinterpret_cast<uint32_t *>(tmp);
-        } else if (cmd == DeltaCommand::KeepChunk) {
+        } else if (deltas[i].command == DeltaCommand::KeepChunk) {
             inPtr += 2;
         }
     }
@@ -104,11 +108,6 @@ void DeltaFile::load(const std::string &filename) throw()
     ifs.seekg(std::ifstream::beg);
     ifs.read(reinterpret_cast<char *>(&header), sizeof(DeltaFileHeader));
 
-    /** endianess is just for mental sanity while debugging. we can remove it **/
-    header.magic = be32toh(header.magic);
-    header.deltas = be32toh(header.deltas);
-    header.len = be32toh(header.len);
-
     if (header.magic != MAGIC)
         throw DeltaException("invalid magic");
 
@@ -129,30 +128,34 @@ void DeltaFile::load(const std::string &filename) throw()
 
     clear();
 
-    for (int i = 0; i < header.deltas; i++)
+    for (uint32_t i = 0; i < header.deltas; i++)
     {
         uint32_t *idPtr = outPtr++;
-        uint32_t *commandPtr = outPtr++;
+        DeltaCommand *commandPtr = reinterpret_cast<DeltaCommand *>(outPtr++);
         uint32_t *posPtr = outPtr++;
         uint32_t *sizePtr = outPtr++;
 
         /** endianess is just for mental sanity while debugging. we can remove it **/
-        Delta delta = { be32toh(*idPtr), be32toh(*commandPtr), be32toh(*posPtr), be32toh(*sizePtr), nullptr };
+        Delta delta;
+        
+        delta.id = *idPtr;
+        delta.command = *commandPtr;
+        delta.pos = *posPtr;
+        delta.size = *sizePtr;
+        delta.data = nullptr;
 
-        if (delta.command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
-            deltaBuffer.release();
-            deltaBuffer = std::make_unique<uint8_t[]>(delta.size + 1);
-            delta.data = deltaBuffer.get();
-            std::memset(delta.data, 0, delta.size + 1);
-            std::memcpy(delta.data, outPtr, delta.size);
+        if (delta.command == DeltaCommand::AddChunk) {
+            delta.data = std::make_unique<uint8_t []>(delta.size + 1);
+            std::memset(delta.data.get(), 0, delta.size + 1);
+            std::memcpy(delta.data.get(), outPtr, delta.size);
             uint8_t *tmp = reinterpret_cast<uint8_t *>(outPtr);
             tmp += delta.size;
             outPtr = reinterpret_cast<uint32_t *>(tmp);
-        } else if (delta.command == static_cast<uint32_t>(DeltaCommand::KeepChunk)) {
+        } else if (delta.command == DeltaCommand::KeepChunk) {
             outPtr += 2;
         }
 
-        deltas.push_back(delta);
+        deltas.push_back(std::move(delta));
     }
 
     ifs.close();
@@ -160,14 +163,13 @@ void DeltaFile::load(const std::string &filename) throw()
 
 void DeltaFile::print()
 {
-    uint32_t i = 0;
-    for (Delta entry : deltas)
+    for (uint32_t i = 0; i < deltas.size(); i++)
     {
-        printf("delta %u id: %u\n", i, entry.id);
-        printf("delta %u command: %u\n", i, entry.command);
-        printf("delta %u pos: %u\n", i, entry.pos);
-        printf("delta %u size: %u\n", i, entry.size);
-        printf("delta %u data: %p\n", i++, entry.data);
+        printf("delta %u id: %u\n", i, deltas[i].id);
+        printf("delta %u command: %u\n", i, static_cast<uint32_t>(deltas[i].command));
+        printf("delta %u pos: %u\n", i, deltas[i].pos);
+        printf("delta %u size: %u\n", i, deltas[i].size);
+        printf("delta %u data: %p\n", i, deltas[i].data.get());
     }
 }
 

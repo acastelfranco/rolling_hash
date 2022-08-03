@@ -50,9 +50,9 @@ public:
 		delta.load(deltaFile);
 
 		for(uint32_t i = 0; i < delta.size(); i++) {
-			if (delta[i].command == static_cast<uint32_t>(DeltaCommand::AddChunk)) {
-				ofs.write(reinterpret_cast<const char*>(delta[i].data), delta[i].size);
-			} else if (delta[i].command == static_cast<uint32_t>(DeltaCommand::KeepChunk)) {
+			if (delta[i].command == DeltaCommand::AddChunk) {
+				ofs.write(reinterpret_cast<const char*>(delta[i].data.get()), delta[i].size);
+			} else if (delta[i].command == DeltaCommand::KeepChunk) {
 				ofs.write(reinterpret_cast<const char*>(fileHandle.data.get() + delta[i].pos), delta[i].size);
 			} else {
 				throw DeltaException("invalid command");

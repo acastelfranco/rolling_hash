@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 enum class DeltaCommand {
 	AddChunk,
@@ -9,8 +10,8 @@ enum class DeltaCommand {
 
 struct Delta {
 	uint32_t id;
-	uint32_t command;
+	DeltaCommand command;
 	uint32_t pos;
 	uint32_t size;
-	uint8_t  *data;
+	std::unique_ptr <uint8_t []> data;
 };
